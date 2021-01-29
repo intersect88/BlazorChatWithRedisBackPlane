@@ -1,0 +1,115 @@
+﻿@page "/"
+@inject NavigationManager navigationManager
+@using Microsoft.AspNetCore.SignalR.Client;
+@using BlazorWithRedisBackPlane.Chat;
+
+ @if (!_isChatting)
+{
+    <p>
+        Enter your name: 
+    </p>
+
+    <input type="text" maxlength="32" @bind="@_username"/>
+    <button type="button" @onclick="@Chat"><span class="oi oi-chat" aria-hidden="true"></span> Start a chat </button>
+}
+else
+{ 
+    <div>
+        <span>User: <b>@_username</b></span>
+    </div>
+    <div id="scrollbox">
+        @foreach (var item in _chatMessages)
+        {
+            <div class="@item.Style">
+                <div class="user">@item.Username</div>
+                <div class="msg">@item.Body</div>
+            </div>            
+        }
+        <hr />
+        <textarea class="input" placeholder="enter your message" @bind="@_newMessage"></textarea>
+        <button class="btn btn-default" style="border-color:grey" @onclick="@(() => SendAsync(_newMessage))">Send</button>
+    </div>
+} 
+
+@code {
+    private bool _isChatting = false;
+    private string _username;
+    private string _message;
+    private string _newMessage;
+    private List<Message> _chatMessages = new List<Message>();
+    private string _chatHubUrl;
+    private HubConnection _hubConnection;
+
+    public async Task Chat()
+    {
+         if (string.IsNullOrWhiteSpace(_username))
+        {
+            _message = "Please enter a name";
+            return;
+        };
+         
+        try
+        {
+            _isChatting = true;
+            await Task.Delay(1);
+
+            _chatMessages.Clear();
+
+            //remove comment if you want to use the app with docker 
+            //string baseUrl = "http://localhost";
+            //_chatHubUrl = baseUrl + ChatHub.HubUrl; 
+
+            //comment the line below if you want use docker
+            _chatHubUrl = navigationManager.BaseUri.TrimEnd('/') + ChatHub.HubUrl; 
+
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(_chatHubUrl)
+                .Build();
+
+            _hubConnection.On<string, string>("ReceiveMessage", HandleMessage);
+
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception e)
+        {
+            _message = $"ERROR: Failed to start chat client: {e.Message}";
+            _isChatting = false;
+        }
+    }
+
+    private void HandleMessage(string name, string message)
+    {
+        bool isMine = name.Equals(_username, StringComparison.OrdinalIgnoreCase);
+
+        _chatMessages.Add(new Message(name, message, isMine));
+
+        // Inform blazor the UI needs updating
+        StateHasChanged();
+    }
+
+    private async Task SendAsync(string message)
+    {
+        if (_isChatting && !string.IsNullOrWhiteSpace(message))
+        {
+            await _hubConnection.SendAsync("SendMessageToAll", _username, message);
+
+            _newMessage = string.Empty;
+        }
+
+    }
+
+    private class Message
+    {
+        public Message(string username, string body, bool mine)
+        {
+            Username = username;
+            Body = body;
+            IsMine = mine;
+        }
+
+        public string Username { get; set; }
+        public string Body { get; set; }
+        public bool IsMine { get; set; }
+        public string Style => IsMine ? "sent" : "received";
+    }
+}
